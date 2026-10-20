@@ -109,8 +109,18 @@ function netEnter(create) {
 function netConnect(roomCode, hello) {
   netCloseSocket();
   netError = '';
+  if (location.protocol !== 'https:' && location.protocol !== 'http:') {
+    netShowError('联机需要通过部署后的 https 网址访问；直接双击打开本地文件无法联机（单机模式不受影响）。');
+    return;
+  }
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${scheme}//${location.host}/api/ws?room=${encodeURIComponent(roomCode)}`);
+  let ws;
+  try {
+    ws = new WebSocket(`${scheme}//${location.host}/api/ws?room=${encodeURIComponent(roomCode)}`);
+  } catch {
+    netShowError('无法创建联机连接，请确认是通过部署后的网址访问。');
+    return;
+  }
   netWs = ws;
   netShowError('');
   const timeout = setTimeout(() => {
@@ -146,7 +156,7 @@ function netConnect(roomCode, hello) {
       netRenderBar();
     }
   };
-  ws.onerror = () => netShowError('无法连接到联机服务器。');
+  ws.onerror = () => netShowError('无法连接到联机服务器。请确认项目是以 Cloudflare Workers（不是 Pages）部署，且 Durable Object 绑定已生效。');
 }
 
 function netCloseSocket() {
@@ -579,6 +589,7 @@ discardCard = (index, auto = false) => {
     else if (localNew) localNew();
   };
   $('onlineBtn').onclick = () => netOpen();
+  $('setupOnline').onclick = () => netOpen();
   $('onlineClose').onclick = () => $('onlineDialog').close();
   const params = new URL(location.href).searchParams;
   const code = params.get('room');
