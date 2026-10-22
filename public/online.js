@@ -278,7 +278,7 @@ function netAdjust() {
   if (state?.phase === 'pre') {
     $('roll').textContent = netRoom.status !== 'playing' ? '掷骰子' : control ? '掷骰子' : netBusy ? '正在播放动画…' : netMine() ? '等待同步…' : '其他作家正在写作…';
   }
-  const hand = state ? handOwner().hand : [];
+  const hand = state ? (state.players[handSeatIndex()]?.hand ?? []) : [];
   $('hand').querySelectorAll('[data-use],[data-discard]').forEach((b) => {
     const discard = b.dataset.discard !== undefined;
     const index = Number(discard ? b.dataset.discard : b.dataset.use);
