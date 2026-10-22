@@ -206,7 +206,7 @@ async function animateItemGains(p,ids,ticket=epoch){
  for(const id of ids){
   if(ticket!==epoch)return false;
   const it=visibleItem(id,state.players.indexOf(p));state.itemGain={...it,player:p.name,playerIndex:state.players.indexOf(p)};render();
-  await pause(650);if(ticket!==epoch)return false;playSound('swish');await pause(350);if(ticket!==epoch)return false;state.itemGain=null;
+  await pause(1300);if(ticket!==epoch)return false;playSound('swish');await pause(700);if(ticket!==epoch)return false;state.itemGain=null;
  }
  state.phase=resume;render();return true;
 }
@@ -420,13 +420,13 @@ async function animateLandingCard(p,ticket,eventOverride=null){
  if(ticket!==epoch)return false;
  const tile=state.tiles[p.pos];if(!tile)return true;
  const resume=state.phase;hideTileHover();state.phase='landing';state.landingCard={event:eventOverride??tile.event,id:tile.id,player:p.name,caption:eventOverride?(eventOverride[5]==='wine-overdrink'?'喝多了…':eventOverride[3]==='receiptResult'?'收据猜拳的结果':'书店推销的结果'):null};render();playLandingSound(state.landingCard.event,p.pos===0&&!eventOverride,ticket);
- await pause(1500);if(ticket!==epoch)return false;
+ await pause(3000);if(ticket!==epoch)return false;
  state.landingCard=null;state.phase=resume;render();return true;
 }
 async function roll(){
  if(state.phase!=='pre'||state.winner)return;
  state.phase='rolling';state.diceReason=null;state.bonusRoll=false;state.trapVictoryPending=false;const p=current(),ticket=epoch,originId=state.tiles[p.pos].id,rest=!!p.restAfterRoll,count=diceCount(p);
- const dice=Array.from({length:count},()=>rollForwardDie(state,p,rand));resetDiceEffect(p);
+ const dice=Array.from({length:count},()=>rollForwardDie(state,p,rand));resetDiceEffect(p);state.lastDice=dice;
  const faces=['⚀','⚁','⚂','⚃','⚄','⚅'];$('die').classList.toggle('double-dice',count>1);render();
  for(let i=0;i<8;i++){if(ticket!==epoch)return;$('die').textContent=Array.from({length:count},()=>faces[rand(6)]).join(' ');await pause(65)}
  if(ticket!==epoch)return;const value=dice.reduce((a,b)=>a+b,0);$('die').textContent=dice.map(d=>(faces[d-1]??String(d))).join(' ');

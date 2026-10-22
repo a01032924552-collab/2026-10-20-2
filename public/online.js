@@ -18,6 +18,9 @@ let netHeartbeat = null;
 let netSyncTimer = null;
 let netLastSent = '';
 let netPending = null;
+let netPublishLast = 0;
+let netDiceTimer = null;
+let netDiceKey = '';
 
 const netLocal = { render, schedule, roll, next, useCard, discardCard };
 
@@ -347,26 +350,33 @@ function netAdjust() {
 }
 
 function netSnapshot() {
-  const copy = JSON.parse(JSON.stringify(state));
-  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan', 'discardAnimation'].forEach((key) => {
-    delete copy[key];
-  });
-  return copy;
+  return JSON.parse(JSON.stringify(state));
 }
 
+// 房主每次 render 都同步一次；140ms 内的高频渲染合并成一帧，动画期间也能把中间状态发出去。
 function netQueuePublish() {
   if (!netIsHost() || !state) return;
-  clearTimeout(netPublishTimer);
-  netPublishTimer = setTimeout(netPublishNow, 150);
+  const now = Date.now();
+  const wait = 140 - (now - netPublishLast);
+  if (wait <= 0) {
+    netPublishLast = now;
+    netPublishNow();
+    return;
+  }
+  if (netPublishTimer) return;
+  netPublishTimer = setTimeout(() => {
+    netPublishTimer = null;
+    netPublishLast = Date.now();
+    netPublishNow();
+  }, wait);
 }
 
 function netPublishNow() {
-  clearTimeout(netPublishTimer);
-  if (!netIsHost() || !state || !netWs) return;
-  if (!['pre', 'end', 'discard', 'won'].includes(state.phase)) {
-    netPublishTimer = setTimeout(netPublishNow, 300);
-    return;
+  if (netPublishTimer) {
+    clearTimeout(netPublishTimer);
+    netPublishTimer = null;
   }
+  if (!netIsHost() || !state || !netWs) return;
   const snap = netSnapshot();
   const sig = JSON.stringify(snap);
   if (sig === netLastSent) return;
@@ -388,25 +398,54 @@ function netStartSync() {
   }, 2500);
 }
 
+function netPlayDice(dice) {
+  const die = $('die');
+  if (!die) return;
+  const faces = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  clearInterval(netDiceTimer);
+  die.classList.toggle('double-dice', dice.length > 1);
+  let n = 0;
+  netDiceTimer = setInterval(() => {
+    if (netDiceTimer === null) return;
+    die.textContent = dice.map(() => faces[Math.floor(Math.random() * 6)]).join(' ');
+    n += 1;
+    if (n >= 8) {
+      clearInterval(netDiceTimer);
+      netDiceTimer = null;
+      die.textContent = dice.map((d) => faces[d - 1] ?? String(d)).join(' ');
+    }
+  }, 65);
+}
+
 function netApplyState(snapshot, seq) {
   if (netIsHost()) return;
   if (!Number.isInteger(seq) || seq <= netSeq) return;
   netSeq = seq;
   netGeneration += 1;
-  epoch += 1;
   clearTimeout(timer);
   clearTimeout(netPending?.timer);
   netPending = null;
   netBusy = false;
-  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan', 'discardAnimation'].forEach((key) => {
-    delete snapshot[key];
-  });
   state = snapshot;
   netSetMusic(state.bgmIndex);
   if (state.winner) stopBgm();
   $('setup').close();
-  if ($('onlineDialog').open) $('onlineDialog').close();
   render();
+  if (state.phase === 'rolling' && Array.isArray(state.lastDice)) {
+    const key = `${state.turn}:${state.log.length}:${state.lastDice.join(',')}`;
+    if (key !== netDiceKey) {
+      netDiceKey = key;
+      netPlayDice(state.lastDice);
+    }
+  } else if (state.phase === 'pre') {
+    clearInterval(netDiceTimer);
+    netDiceTimer = null;
+    const die = $('die');
+    if (die) {
+      die.textContent = '⚄';
+      die.classList.remove('double-dice');
+    }
+  }
 }
 
 async function netApplyRemote(cmd, from) {
@@ -597,6 +636,10 @@ function netDetach() {
   netPending = null;
   clearInterval(netSyncTimer);
   clearInterval(netHeartbeat);
+  clearInterval(netDiceTimer);
+  netDiceTimer = null;
+  netDiceKey = '';
+  netPublishLast = 0;
   netHello = null;
   netRetry = 0;
   netLastSent = '';
