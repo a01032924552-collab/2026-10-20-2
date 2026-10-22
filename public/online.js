@@ -12,6 +12,12 @@ let netDraft = null;
 let netGeneration = 0;
 let netPublishTimer = null;
 let netRemoteBusy = false;
+let netHello = null;
+let netRetry = 0;
+let netHeartbeat = null;
+let netSyncTimer = null;
+let netLastSent = '';
+let netPending = null;
 
 const netLocal = { render, schedule, roll, next, useCard, discardCard };
 
@@ -33,7 +39,9 @@ const netStore = {
 function netUid() {
   let uid = netStore.get('nl-uid');
   if (!uid) {
-    uid = crypto.randomUUID();
+    uid = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
     netStore.set('nl-uid', uid);
   }
   return uid;
@@ -103,7 +111,9 @@ function netEnter(create) {
   }
   netStore.set('nl-name', name);
   netStore.set('nl-piece', String(piece));
-  netConnect(create ? 'new' : code, { t: 'hello', name, piece, capacity, uid: netUid() });
+  netHello = { t: 'hello', name, piece, capacity, uid: netUid() };
+  netRetry = 0;
+  netConnect(create ? 'new' : code, netHello);
 }
 
 function netConnect(roomCode, hello) {
@@ -137,6 +147,14 @@ function netConnect(roomCode, hello) {
     try {
       ws.send(JSON.stringify(hello));
     } catch {}
+    clearInterval(netHeartbeat);
+    netHeartbeat = setInterval(() => {
+      if (netWs === ws && ws.readyState === 1) {
+        try {
+          ws.send(JSON.stringify({ t: 'ping' }));
+        } catch {}
+      }
+    }, 20000);
   };
   ws.onmessage = (event) => {
     let msg;
@@ -149,11 +167,15 @@ function netConnect(roomCode, hello) {
   };
   ws.onclose = () => {
     clearTimeout(timeout);
+    clearInterval(netHeartbeat);
     if (netWs !== ws) return;
     netWs = null;
-    if (netRoom) {
-      netError = '连接已断开，刷新页面可重连';
-      netRenderBar();
+    if (!netRoom) return;
+    if (netHello && netRoundActive()) {
+      netShowError('连接中断，正在自动重连…');
+      netScheduleReconnect();
+    } else {
+      netShowError('连接已断开，刷新页面可重连');
     }
   };
   ws.onerror = () => netShowError('无法连接到联机服务器。请确认项目是以 Cloudflare Workers（不是 Pages）部署，且 Durable Object 绑定已生效。');
@@ -167,6 +189,41 @@ function netCloseSocket() {
       ws.close();
     } catch {}
   }
+}
+
+function netRoundActive() {
+  return !!netRoom;
+}
+
+function netScheduleReconnect() {
+  if (!netHello || !netRoom) return;
+  if (netRetry >= 6) {
+    netShowError('重连失败，请刷新页面重新加入房间。');
+    return;
+  }
+  netRetry += 1;
+  const wait = Math.min(1000 * netRetry, 6000);
+  setTimeout(() => {
+    if (!netRoom || !netHello || netWs) return;
+    netConnect(netRoom.id, netHello);
+  }, wait);
+}
+
+function netSendCmd(cmd) {
+  netSend({ t: 'cmd', cmd });
+  clearTimeout(netPending?.timer);
+  netPending = { cmd, tries: 1, timer: setTimeout(netRetryCmd, 2500) };
+}
+
+function netRetryCmd() {
+  if (!netPending) return;
+  if (!netWs || netWs.readyState !== 1 || !netMine() || netPending.tries >= 3) {
+    netPending = null;
+    return;
+  }
+  netPending.tries += 1;
+  netSend({ t: 'cmd', cmd: netPending.cmd });
+  netPending.timer = setTimeout(netRetryCmd, 2500);
 }
 
 // ---------- 场景 2：等候室 ----------
@@ -310,7 +367,25 @@ function netPublishNow() {
     netPublishTimer = setTimeout(netPublishNow, 300);
     return;
   }
-  netSend({ t: 'state', state: netSnapshot() });
+  const snap = netSnapshot();
+  const sig = JSON.stringify(snap);
+  if (sig === netLastSent) return;
+  netLastSent = sig;
+  netSend({ t: 'state', state: snap });
+}
+
+function netStartSync() {
+  clearInterval(netSyncTimer);
+  netLastSent = '';
+  netSyncTimer = setInterval(() => {
+    if (!netIsHost() || !state || !netWs) return;
+    if (!['pre', 'end', 'discard', 'won'].includes(state.phase)) return;
+    const snap = netSnapshot();
+    const sig = JSON.stringify(snap);
+    if (sig === netLastSent) return;
+    netLastSent = sig;
+    netSend({ t: 'state', state: snap });
+  }, 2500);
 }
 
 function netApplyState(snapshot, seq) {
@@ -320,6 +395,8 @@ function netApplyState(snapshot, seq) {
   netGeneration += 1;
   epoch += 1;
   clearTimeout(timer);
+  clearTimeout(netPending?.timer);
+  netPending = null;
   netBusy = false;
   ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan', 'discardAnimation'].forEach((key) => {
     delete snapshot[key];
@@ -397,6 +474,7 @@ async function netStartHost() {
   log('新的作家人生开始了。');
   await startTurn();
   netPublishNow();
+  netStartSync();
 }
 
 function netSetMusic(index) {
@@ -424,6 +502,7 @@ function netOnMessage(msg) {
       netMember = { id: msg.memberId };
       netRoom = msg.room;
       netSeq = 0;
+      netRetry = 0;
       netError = '';
       netShowError('');
       try {
@@ -458,6 +537,8 @@ function netOnMessage(msg) {
     case 'restart': {
       netRoom = msg.room;
       netSeq = 0;
+      netLastSent = '';
+      clearInterval(netSyncTimer);
       state = null;
       epoch += 1;
       clearTimeout(timer);
@@ -512,6 +593,13 @@ function netDetach() {
   epoch += 1;
   clearTimeout(timer);
   clearTimeout(netPublishTimer);
+  clearTimeout(netPending?.timer);
+  netPending = null;
+  clearInterval(netSyncTimer);
+  clearInterval(netHeartbeat);
+  netHello = null;
+  netRetry = 0;
+  netLastSent = '';
   state = null;
   stopBgm();
   $('onlineBar').hidden = true;
@@ -546,7 +634,7 @@ next = () => {
     netLocal.next();
     netPublishNow();
   } else if (netMine() && !netBusy) {
-    netSend({ t: 'cmd', cmd: { type: 'next' } });
+    netSendCmd({ type: 'next' });
   }
 };
 
@@ -557,7 +645,7 @@ roll = async () => {
     await netLocal.roll();
     netPublishNow();
   } else if (netMine() && !netBusy) {
-    netSend({ t: 'cmd', cmd: { type: 'roll' } });
+    netSendCmd({ type: 'roll' });
   }
 };
 
