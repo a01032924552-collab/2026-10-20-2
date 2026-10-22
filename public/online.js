@@ -79,7 +79,7 @@ function netShowError(message) {
 function netEntry(code = '') {
   const name = netStore.get('nl-name', '作家');
   const piece = Number(netStore.get('nl-piece', '0')) || 0;
-  $('onlineContent').innerHTML = `<small>ONLINE TABLE</small><h2>即使相隔千里，也共享同一个故事。</h2><p>2〜8人。CPU也可参加。最先创建房间的人担任房主，由房主的浏览器推进游戏。</p><label>作家名字<input id="netName" value="${esc(name)}" maxlength="14" autocomplete="nickname"></label><label>国际象棋棋子<select id="netPiece">${pieces
+  $('onlineContent').innerHTML = `<small>ONLINE TABLE</small><h2>即使相隔千里，也共享同一个故事。</h2><p>2～8人。CPU也可参加。最先创建房间的人担任房主，由房主的浏览器推进游戏。</p><label>作家名字<input id="netName" value="${esc(name)}" maxlength="14" autocomplete="nickname"></label><label>国际象棋棋子<select id="netPiece">${pieces
     .map((p, i) => `<option value="${i}" ${i === piece ? 'selected' : ''}>${p.name}</option>`)
     .join('')}</select></label><label>招募人数（含自己・CPU）<select id="netCapacity">${[2, 3, 4, 5, 6, 7, 8]
     .map((n) => `<option value="${n}" ${n === 8 ? 'selected' : ''}>${n}名</option>`)
@@ -291,7 +291,7 @@ function netAdjust() {
 
 function netSnapshot() {
   const copy = JSON.parse(JSON.stringify(state));
-  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan'].forEach((key) => {
+  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan', 'discardAnimation'].forEach((key) => {
     delete copy[key];
   });
   return copy;
@@ -321,7 +321,7 @@ function netApplyState(snapshot, seq) {
   epoch += 1;
   clearTimeout(timer);
   netBusy = false;
-  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan'].forEach((key) => {
+  ['motion', 'landingCard', 'itemGain', 'itemUse', 'reshuffling', 'cardFlights', 'relocation', 'mapSelection', 'mapPlan', 'discardAnimation'].forEach((key) => {
     delete snapshot[key];
   });
   state = snapshot;
@@ -365,12 +365,16 @@ async function netStartHost() {
       nextDice: 1,
       skip: false,
       laps: 0,
+      character: null,
+      illnessTurns: 0,
+      illnessFresh: false,
       color: colors[i % colors.length],
       memberId: m.id,
     })),
   );
   state = {
     tileCount: settings.tileCount,
+    revealItems: false,
     turnLimitEnabled: !!settings.turnLimitEnabled,
     target: settings.target,
     turnLimit: settings.turnLimit,

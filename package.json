@@ -1,8 +1,8 @@
 {
   "name": "novel-life-cn",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "轻小说作家的人生 —— 中文版棋盘游戏（Cloudflare Workers + Durable Objects）",
+  "description": "轻小说作家的人生 —— 中文版棋盘游戏（Cloudflare Workers + Durable Objects 联机）",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
